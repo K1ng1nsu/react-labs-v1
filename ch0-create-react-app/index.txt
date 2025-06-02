@@ -1,0 +1,29 @@
+-------------------------------
+Create React App with CRA
+-------------------------------
+
+-- js
+npx create-react-app [PROJECT_NAME]
+cd [PROJECT_NAME]
+npm start
+
+-- ts
+npx create-react-app [PROJECT_NAME] --template typescript
+cd [PROJECT_NAME]
+npm start
+
+-------------------------------
+Create React App with Vite
+-------------------------------
+
+npm create vite@latest [PROJECT_NAME]
+하고 react -> js or ts
+
+아니면
+npm create vite@latest [PROJECT_NAME] -- --template react-ts
+
+
+
+cd [PROJECT_NAME]
+npm install
+npm run dev
