@@ -1,0 +1,109 @@
+네, 커스텀 훅에서 다른 커스텀 훅이 반환하는 함수를 `useCallback`으로 감싸는 것은 **불필요한 리렌더링을 방지하고 성능을 최적화하기 위함**입니다.
+
+조금 더 자세히 설명해 드릴게요.
+
+### 1. React 훅의 원리 (feat. 참조 동등성)
+
+React 컴포넌트가 리렌더링될 때, 컴포넌트 내부에서 선언된 함수들은 **매 렌더링마다 새로 생성됩니다.** JavaScript에서 함수는 객체와 마찬가지로 참조 타입(reference type)이기 때문에, 내용이 같더라도 메모리 주소가 다르면 `===` 비교 시 `false`가 됩니다.
+
+```javascript
+// 매 렌더링마다 `handleClick` 함수는 새로 생성됨
+function MyComponent() {
+  const handleClick = () => {
+    console.log('Clicked');
+  };
+
+  return <button onClick={handleClick}>Click me</button>;
+}
+```
+
+### 2. `useCallback`이 필요한 이유
+
+`useCallback` 훅은 특정 함수를 **의존성 배열(dependency array)에 있는 값들이 변경되지 않는 한 재사용**하도록 해줍니다. 즉, 함수가 메모리상에서 동일한 참조(reference)를 유지하도록 합니다.
+
+```javascript
+import { useCallback } from 'react';
+
+function MyComponent() {
+  const handleClick = useCallback(() => {
+    console.log('Clicked');
+  }, []); // 의존성 배열이 비어있으므로 컴포넌트가 처음 마운트될 때 한 번만 생성됨
+
+  return <button onClick={handleClick}>Click me</button>;
+}
+```
+
+### 3. 커스텀 훅 조합 시 `useCallback`의 역할
+
+앞서 보여드린 `useModal` 예시를 다시 보겠습니다.
+
+```typescript
+// hooks/useModal.ts
+import { useToggle } from './useToggle';
+import { useCallback } from 'react'; // <-- 여기
+
+interface UseModalReturn {
+  isOpen: boolean;
+  openModal: () => void;
+  closeModal: () => void;
+  toggleModal: () => void;
+}
+
+export const useModal = (initialOpen: boolean = false): UseModalReturn => {
+  const { isOn: isOpen, setTrue: openModalInner, setFalse: closeModalInner, toggle: toggleModalInner } = useToggle(initialOpen);
+
+  return {
+    isOpen,
+    openModal: useCallback(() => openModalInner(), [openModalInner]), // 여기
+    closeModal: useCallback(() => closeModalInner(), [closeModalInner]), // 여기
+    toggleModal: useCallback(() => toggleModalInner(), [toggleModalInner]), // 여기
+  };
+};
+```
+
+여기서 `useModal` 훅은 `useToggle` 훅이 반환하는 `setTrue`, `setFalse`, `toggle` 함수(예시에서는 `openModalInner`, `closeModalInner`, `toggleModalInner`로 이름을 변경했습니다)를 받아서 자신의 반환 값으로 내보내고 있습니다.
+
+**만약 `useCallback`으로 감싸지 않았다면 어떤 문제가 발생할까요?**
+
+1.  **`useModal`이 리렌더링될 때마다:** `useModal` 훅이 사용된 컴포넌트가 리렌더링될 때마다 `useModal` 훅 내부의 로직이 다시 실행됩니다.
+2.  **`useToggle` 함수 재실행:** `useToggle(initialOpen)`이 다시 호출됩니다.
+3.  **`useToggle`이 반환하는 함수들의 새로운 참조 생성:** `useToggle` 훅 내부에서 `useCallback`을 사용했더라도, `useModal`이 호출될 때마다 `useToggle` 훅의 실행 결과로 반환되는 `setTrue`, `setFalse`, `toggle` 함수들은 `useModal` 입장에서는 "새로운 함수 객체"로 인식됩니다.
+    * **핵심:** `useToggle`이 반환하는 함수들은 `useToggle` 내부적으로는 안정적인 참조를 유지하지만, `useModal`이 매 렌더링마다 `useToggle`을 **호출**하기 때문에, `useModal` 입장에서는 **매번 새로운 `openModalInner`, `closeModalInner`, `toggleModalInner`를 받게 됩니다.**
+4.  **`useModal`이 반환하는 함수들의 새로운 참조 생성:** 따라서 `useModal`이 반환하는 `openModal`, `closeModal`, `toggleModal` 함수들도 매 렌더링마다 새로운 참조를 가지게 됩니다.
+
+**이것이 문제가 되는 경우:**
+
+`useModal`이 반환하는 `openModal`, `closeModal`, `toggleModal` 함수들이 자식 컴포넌트의 `props`로 전달되거나, `React.memo`로 감싸진 컴포넌트에 전달될 때 문제가 됩니다.
+
+* **자식 컴포넌트의 불필요한 리렌더링:** `React.memo`로 감싸진 자식 컴포넌트는 `props`가 변경되지 않으면 리렌더링되지 않도록 최적화됩니다. 하지만 `openModal` 등의 함수가 매 렌더링마다 새로운 참조를 가지게 되면, `React.memo`는 `props`가 변경되었다고 판단하여 **자식 컴포넌트를 불필요하게 리렌더링**하게 됩니다. 이는 성능 저하로 이어질 수 있습니다.
+
+**`useCallback`으로 감싸면:**
+
+`useModal` 내부에서 `useCallback`으로 `openModalInner` 등을 감싸면, `openModalInner` 자체가 변경되지 않는 한 (`useToggle` 훅의 내부 로직이나 `initialOpen` 값이 변경되지 않는 한) `useModal`이 반환하는 `openModal` 함수도 **동일한 참조를 유지**하게 됩니다.
+
+```typescript
+// hooks/useModal.ts (useCallback 적용)
+export const useModal = (initialOpen: boolean = false): UseModalReturn => {
+  const { isOn: isOpen, setTrue: openModalInner, setFalse: closeModalInner, toggle: toggleModalInner } = useToggle(initialOpen);
+
+  // useToggle이 반환하는 함수들이 변경되지 않는 한,
+  // openModal, closeModal, toggleModal도 동일한 참조를 유지함
+  return {
+    isOpen,
+    openModal: useCallback(() => openModalInner(), [openModalInner]),
+    closeModal: useCallback(() => closeModalInner(), [closeModalInner]),
+    toggleModal: useCallback(() => toggleModalInner(), [toggleModalInner]),
+  };
+};
+```
+
+이렇게 함으로써 `useModal`을 사용하는 컴포넌트나 그 자식 컴포넌트들이 `useModal`이 반환하는 함수들 때문에 불필요하게 리렌더링되는 것을 방지하여 애플리케이션의 성능을 최적화할 수 있습니다.
+
+### 요약
+
+커스텀 훅에서 다른 커스텀 훅이 반환하는 함수를 `useCallback`으로 감싸는 주된 이유는 다음과 같습니다:
+
+1.  **참조 안정성 유지:** 매 렌더링마다 새로운 함수가 생성되는 것을 방지하고, 동일한 함수 참조를 유지합니다.
+2.  **불필요한 리렌더링 방지:** 이 함수들을 `props`로 받는 `React.memo`로 최적화된 자식 컴포넌트들이 불필요하게 리렌더링되는 것을 막아 성능을 향상시킵니다.
+
+이는 React 애플리케이션의 성능을 미세 조정하고 최적화하는 중요한 기법 중 하나입니다.

@@ -1,0 +1,148 @@
+`React.memo`는 React에서 컴포넌트의 **불필요한 리렌더링을 방지하여 성능을 최적화**하는 데 사용되는 Higher-Order Component (HOC) 입니다. 함수형 컴포넌트에만 적용할 수 있습니다.
+
+### `React.memo`의 동작 원리
+
+`React.memo`로 감싸진 컴포넌트는 다음과 같이 동작합니다:
+
+1.  컴포넌트가 처음 렌더링될 때, `React.memo`는 해당 컴포넌트의 렌더링 결과(JSX)를 메모리에 저장(메모이제이션)합니다.
+2.  이후 부모 컴포넌트가 리렌더링되거나, 해당 컴포넌트의 `props`가 변경될 때 React는 다시 렌더링을 시도합니다.
+3.  `React.memo`는 새로운 `props`와 이전에 저장된 `props`를 **얕게 비교(shallow comparison)** 합니다.
+    * **얕은 비교:** 객체나 배열 같은 참조 타입의 `props`의 경우, 내용물이 같더라도 메모리 주소가 다르면 `React.memo`는 다른 `props`라고 판단하여 리렌더링을 발생시킵니다. 원시 타입(숫자, 문자열, 불리언)은 값이 같으면 동일하다고 판단합니다.
+4.  만약 `props`가 **동일하다고 판단되면**, `React.memo`는 컴포넌트를 다시 렌더링하지 않고 이전에 저장된 렌더링 결과(메모이제이션된 결과)를 재사용합니다.
+5.  만약 `props`가 **다르다고 판단되면**, 컴포넌트는 다시 렌더링됩니다.
+
+### `React.memo` 사용법
+
+`React.memo`는 컴포넌트를 감싸는 형태로 사용합니다.
+
+**기본 사용법 (얕은 비교):**
+
+```typescript
+import React from 'react';
+
+// 자식 컴포넌트
+interface MyChildProps {
+  name: string;
+  age: number;
+}
+
+const MyChild: React.FC<MyChildProps> = ({ name, age }) => {
+  console.log('MyChild rendered!'); // 이 로그가 불필요하게 찍히는 것을 방지하고 싶을 때
+  return (
+    <div>
+      <p>Name: {name}</p>
+      <p>Age: {age}</p>
+    </div>
+  );
+};
+
+// React.memo로 감싸기
+export default React.memo(MyChild);
+```
+
+**사용 예시 (부모 컴포넌트):**
+
+```typescript
+import React, { useState } from 'react';
+import MyChild from './MyChild'; // React.memo로 감싼 MyChild
+
+const ParentComponent: React.FC = () => {
+  const [count, setCount] = useState(0);
+  const [userName, setUserName] = useState('Alice');
+  const [userAge, setUserAge] = useState(30);
+
+  const incrementCount = () => {
+    setCount(prev => prev + 1);
+  };
+
+  const changeUserName = () => {
+    setUserName('Bob');
+  };
+
+  const changeUserAge = () => {
+    setUserAge(31);
+  };
+
+  console.log('ParentComponent rendered!');
+
+  return (
+    <div>
+      <h1>Parent Component</h1>
+      <p>Count: {count}</p>
+      <button onClick={incrementCount}>Increment Count</button>
+      <button onClick={changeUserName}>Change User Name</button>
+      <button onClick={changeUserAge}>Change User Age</button>
+
+      {/* userName과 userAge가 변경되지 않으면 MyChild는 리렌더링되지 않음 */}
+      <MyChild name={userName} age={userAge} />
+    </div>
+  );
+};
+
+export default ParentComponent;
+```
+
+위 예시에서 `ParentComponent`의 `count` 상태만 변경되면 `ParentComponent`는 리렌더링되지만, `MyChild`의 `name`과 `age` prop은 변경되지 않았으므로 `React.memo` 덕분에 `MyChild`는 리렌더링되지 않습니다.
+
+### 커스텀 비교 함수 사용 (두 번째 인자)
+
+`React.memo`는 두 번째 인자로 `props` 비교를 위한 커스텀 함수를 받을 수 있습니다. 이 함수는 `(prevProps, nextProps)`를 인자로 받으며, `true`를 반환하면 리렌더링을 건너뛰고, `false`를 반환하면 리렌더링을 수행합니다.
+
+이것은 `props`가 객체나 배열처럼 얕은 비교만으로는 충분하지 않은 경우에 유용합니다.
+
+```typescript
+import React from 'react';
+
+interface ComplexChildProps {
+  user: {
+    id: number;
+    name: string;
+    email: string;
+  };
+  onClick: () => void;
+}
+
+const ComplexChild: React.FC<ComplexChildProps> = ({ user, onClick }) => {
+  console.log('ComplexChild rendered!');
+  return (
+    <div onClick={onClick}>
+      <p>User ID: {user.id}</p>
+      <p>User Name: {user.name}</p>
+      <p>User Email: {user.email}</p>
+    </div>
+  );
+};
+
+// 커스텀 비교 함수
+const arePropsEqual = (prevProps: ComplexChildProps, nextProps: ComplexChildProps) => {
+  // user.id, user.name, user.email만 비교하고 싶을 때
+  // 실제 애플리케이션에서는 모든 props를 신중하게 비교해야 함
+  return (
+    prevProps.user.id === nextProps.user.id &&
+    prevProps.user.name === nextProps.user.name &&
+    prevProps.user.email === nextProps.user.email &&
+    prevProps.onClick === nextProps.onClick // 함수도 비교해야 함! (useCallback과 함께 사용 권장)
+  );
+};
+
+export default React.memo(ComplexChild, arePropsEqual);
+```
+
+**주의:** 커스텀 비교 함수를 사용할 때는 모든 `props`를 올바르게 비교해야 합니다. 특히 함수(`onClick` 등)나 객체/배열 내부의 깊은 값들을 비교할 때는 신중해야 합니다. 함수는 `useCallback`으로, 객체는 `useMemo`로 래핑하여 참조 안정성을 유지하는 것이 중요합니다.
+
+### `React.memo`를 사용해야 할 때
+
+* **컴포넌트가 자주 리렌더링될 때:** 특히 부모 컴포넌트의 상태가 자주 변경되어 자식 컴포넌트까지 불필요하게 리렌더링되는 경우.
+* **컴포넌트의 렌더링 비용이 클 때:** 복잡한 계산, 많은 DOM 엘리먼트 렌더링 등으로 인해 렌더링에 시간이 많이 소요되는 컴포넌트.
+* **컴포넌트에 전달되는 `props`가 자주 변하지 않을 때:** `props`가 자주 변한다면 `React.memo`의 비교 비용이 렌더링 비용보다 더 커질 수 있습니다.
+
+### `React.memo`를 사용하지 않아야 할 때 (또는 주의할 점)
+
+* **컴포넌트가 작고 렌더링 비용이 거의 없을 때:** 작은 컴포넌트에 `React.memo`를 적용하면 `props` 비교 오버헤드가 더 커질 수 있습니다.
+* **컴포넌트에 전달되는 `props`가 거의 매번 변경될 때:** 이런 경우 `React.memo`는 항상 `props`가 다르다고 판단하여 비교 오버헤드만 추가하고 최적화 효과는 없습니다.
+* **`children` `prop`을 받을 때:** `children`은 항상 새로운 객체로 전달될 가능성이 높으므로, `React.memo`가 제대로 작동하지 않을 수 있습니다.
+* **`Context API`를 사용할 때:** `Context.Consumer` 또는 `useContext`를 사용하는 컴포넌트는 `Context` 값이 변경되면 `React.memo`와 관계없이 리렌더링됩니다.
+
+### 결론
+
+`React.memo`는 React 애플리케이션의 성능을 향상시키는 강력한 도구이지만, 모든 컴포넌트에 무작정 적용해서는 안 됩니다. 성능 병목 현상이 발생할 때 프로파일링 도구를 사용하여 원인을 파악하고, 필요한 경우에만 신중하게 적용하는 것이 좋습니다. 또한, `useCallback`과 `useMemo`를 함께 사용하여 `props`의 참조 안정성을 확보하는 것이 `React.memo`의 효과를 극대화하는 데 중요합니다.
